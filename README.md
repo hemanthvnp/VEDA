@@ -8,9 +8,11 @@ This repository implements **Multi-view Discriminant Analysis** (Kan et al.,
 baseline, and evaluates both on a genuinely multi-view benchmark (UCI Multiple
 Features) with a path-agnostic loader for face-recognition data (ColorFERET).
 
-> **TL;DR result:** on UCI Multiple Features (10 classes, 6 views), the pipeline
-> reaches **~98.7%** test accuracy on the canonical hold-out split, validated
-> with 5-fold cross-validation.
+> **TL;DR results:**
+> - **UCI Multiple Features** (10 classes, 6 views): **~98.7%** on the canonical
+>   hold-out split, validated with 5-fold CV.
+> - **ColorFERET** cross-pose face recognition: **90.7%** identification across
+>   **993 subjects** (2 frontal poses), and **95.3%** on 200 subjects with 4 poses.
 
 ---
 
@@ -43,6 +45,20 @@ UCI Multiple Features, canonical 1000/1000 per-class split, `RobustScaler`,
 | Concatenation-LDA | weighted ensemble | **~98.7%** |
 
 5-fold cross-validation gives a consistent estimate with small variance.
+
+### ColorFERET — cross-pose face recognition (pose = view, subject = class)
+
+PCA (eigenfaces, 120 dims/view) → shared MvDA subspace → nearest-class-mean on
+held-out single-pose probes. Verified on Colab with the licensed images:
+
+| poses (views) | subjects | probes | accuracy | macro-F1 |
+|---------------|---------:|-------:|---------:|---------:|
+| `fa fb hl hr` | 200 | 1,225 | **95.27%** | 0.967 |
+| `fa fb` (all) | 993 | 2,869 | **90.66%** | 0.938 |
+
+Per-pose (4-view run): fa 97.4%, fb 94.6%, hl 95.9%, hr 93.2%. Reproduce with
+[`notebooks/colab_quickstart.ipynb`](notebooks/colab_quickstart.ipynb).
+
 Full methodology, ablations (scaler / components / distance metric), and an
 honest discussion of the MvDA-vs-concatenation distinction are in
 [`docs/FINDINGS.md`](docs/FINDINGS.md).

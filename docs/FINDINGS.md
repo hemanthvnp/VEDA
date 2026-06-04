@@ -74,6 +74,32 @@ reaches **~98.7%** test accuracy on the canonical mfeat split. Under stratified
 5-fold cross-validation the estimate is similar with a small standard
 deviation. Reproduce: `python experiments/cross_validation.py`.
 
+## ColorFERET — cross-pose face recognition
+
+A second, harder benchmark where **pose = view** and **subject = class**. Unlike
+mfeat, the views are *independently sampled* (multiple images per subject per
+pose, no row correspondence), which drove the model's per-view-label support.
+
+Pipeline: per-view PCA (eigenfaces, 120 dims) → shared MvDA subspace → classify
+each held-out single-pose probe by nearest class mean (cosine). Verified on the
+licensed images (via Colab + Drive mount):
+
+| poses (views) | subjects | probes | accuracy | macro-F1 |
+|---------------|---------:|-------:|---------:|---------:|
+| `fa fb hl hr` | 200 | 1,225 | 95.27% | 0.967 |
+| `fa fb` (all subjects) | 993 | 2,869 | 90.66% | 0.938 |
+
+Observations:
+- Accuracy is highest on near-frontal probes (fa 97.4%) and lower on the
+  half-profile poses (hr 93.2%), as expected — larger pose gaps are harder.
+- Scaling to **993 identities** with only two frontal views still yields ~90.7%
+  rank-1 identification, showing the shared subspace generalizes across the full
+  subject set, not just a small subset.
+- More poses (4 vs 2) raises accuracy but shrinks the usable subject pool
+  (subjects must appear in every requested pose).
+
+Reproduce: `experiments/run_feret.py` (see `docs/COLORFERET.md`).
+
 ## What did *not* close the last fraction of a percent
 
 - Larger `k` (>9): no help — LDA is rank-limited at `C-1`.
