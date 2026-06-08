@@ -45,10 +45,13 @@ Per-pose breakdown (4-view run): fa 97.4% · fb 94.6% · hl 95.9% · hr 93.2%
 
 ## t-SNE: what the shared subspace does
 
-Generate with `python experiments/visualize_subspace.py` → saved to `results/tsne_comparison.png`.
+![t-SNE comparison](results/tsne_comparison.png)
 
-Left: t-SNE of raw 649-D concatenated features. Right: t-SNE of the 9-D MvDA shared subspace.
-Six heterogeneous views (Fourier coefficients, pixel averages, Zernike moments, morphological features, profile correlations, Karhunen–Loève coefficients) collapse into tight, well-separated clusters.
+Six heterogeneous views (Fourier coefficients, pixel averages, Zernike moments, morphological
+features, profile correlations, Karhunen–Loève coefficients) collapse into tight, well-separated
+digit clusters in the 9-D MvDA shared subspace (right) vs. raw 649-D concatenated features (left).
+
+Reproduce: `python experiments/visualize_subspace.py`
 
 ---
 
