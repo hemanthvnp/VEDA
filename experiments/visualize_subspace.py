@@ -45,7 +45,7 @@ def main():
     shared = mvlda.transform(Xte)          # 9-D shared subspace
 
     print(f"Running t-SNE on raw ({raw.shape[1]}D) and shared ({shared.shape[1]}D) — ~60s ...")
-    tsne_kw = dict(n_components=2, random_state=0, perplexity=40, n_iter=1000)
+    tsne_kw = dict(n_components=2, random_state=0, perplexity=40, max_iter=1000)
     raw_2d = TSNE(**tsne_kw).fit_transform(raw)
     shared_2d = TSNE(**tsne_kw).fit_transform(shared)
 
