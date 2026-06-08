@@ -12,12 +12,12 @@ Implemented [Kan et al., IEEE TPAMI 2016](docs/references/) from scratch in NumP
 
 | Method | Input | Test Accuracy |
 |---|---|---:|
-| Random Forest | 649-D concatenated | ~96% |
-| SVM (RBF) | 649-D concatenated | ~97% |
-| MLP (512→256) | 649-D concatenated | ~97% |
-| Single-view LDA (best view) | 1 view only | ~98% |
-| **MvDA + NCM (cosine)** | **6 views fused** | **97.7%** |
-| **Concat-LDA + Ensemble** | **6 views fused** | **98.7%** |
+| SVM (RBF) | 649-D concatenated | 97.80% |
+| MLP (512→256) | 649-D concatenated | 98.10% |
+| Random Forest | 649-D concatenated | 98.40% |
+| Single-view LDA (best: fac view) | 1 view only | 97.90% |
+| MvDA + NCM (cosine) | 6 views fused | 97.70% |
+| **Concat-LDA + Ensemble** | **6 views fused** | **98.70%** |
 
 Reproduce: `python experiments/baseline_comparison.py`
 
