@@ -20,6 +20,7 @@ import bz2
 import io
 import os
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -74,6 +75,19 @@ def _read_image(path: str, size: Tuple[int, int], grayscale: bool) -> np.ndarray
 
     img = img.convert("L" if grayscale else "RGB").resize(size)
     return np.asarray(img, dtype=np.float64).reshape(-1)
+
+
+def _load_subject_poses(args):
+    """Worker: load all poses for one subject. Used by ThreadPoolExecutor."""
+    subject, label, poses, paths_by_pose, image_size, grayscale = args
+    return label, {
+        pose: np.asarray([_read_image(p, image_size, grayscale) for p in paths_by_pose[pose]])
+        for pose in poses
+    }
+
+
+def _n_workers():
+    return min(32, (os.cpu_count() or 4) * 2)
 
 
 def _scan(root: str):
@@ -142,13 +156,25 @@ def load_colorferet(
         subjects = subjects[:max_subjects]
     label_of = {s: i for i, s in enumerate(subjects)}
 
+    task_args = [
+        (subject, label_of[subject], poses, table[subject], image_size, grayscale)
+        for subject in subjects
+    ]
+    print(f"  loading {len(subjects)} subjects × {len(poses)} poses "
+          f"({len(task_args)} tasks, {_n_workers()} threads) ...")
+    per_subject = {}
+    with ThreadPoolExecutor(max_workers=_n_workers()) as ex:
+        for label, data in ex.map(_load_subject_poses, task_args):
+            per_subject[label] = data
+
     views, ys = [], []
     for pose in poses:
         feats, labels = [], []
         for subject in subjects:
-            for path in table[subject][pose]:
-                feats.append(_read_image(path, image_size, grayscale))
-                labels.append(label_of[subject])
+            lab = label_of[subject]
+            for img in per_subject[lab][pose]:
+                feats.append(img)
+                labels.append(lab)
         views.append(np.asarray(feats))
         ys.append(np.asarray(labels, dtype=int))
 
@@ -203,12 +229,16 @@ def load_colorferet_grouped(
     if max_subjects:
         subjects = subjects[:max_subjects]
 
+    task_args = [
+        (subject, label, poses, table[subject], image_size, grayscale)
+        for label, subject in enumerate(subjects)
+    ]
+    print(f"  loading {len(subjects)} subjects × {len(poses)} poses "
+          f"({len(task_args)} tasks, {_n_workers()} threads) ...")
     groups = {}
-    for label, subject in enumerate(subjects):
-        groups[label] = {
-            pose: np.asarray([_read_image(p, image_size, grayscale) for p in table[subject][pose]])
-            for pose in poses
-        }
+    with ThreadPoolExecutor(max_workers=_n_workers()) as ex:
+        for label, data in ex.map(_load_subject_poses, task_args):
+            groups[label] = data
 
     if cache_path:
         os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
