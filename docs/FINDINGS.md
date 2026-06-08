@@ -40,7 +40,7 @@ fusion:
 | view | dim | LDA acc. |
 |------|-----|----------|
 | fou | 76 | ~81% |
-| fac | 216 | ~98% |
+| fac | 216 | 97.90% |
 | kar | 64 | ~95% |
 | pix | 240 | ~94% |
 | zer | 47 | ~82% |
@@ -51,28 +51,30 @@ Reproduce: `python experiments/per_view_analysis.py`.
 ## Ablations
 
 **Preprocessing.** Per-view scaling matters; `RobustScaler` edged out
-`StandardScaler` (robust to outliers in the morphological/Zernike views).
+`StandardScaler` (robust to outliers in the morphological/Zernike views):
+none 98.5% → standard 98.6% → robust **98.7%**.
 Reproduce: `python experiments/ablation_scaler.py`.
 
-**Shared-space dimensionality.** Accuracy rises with components up to `C-1 = 9`
-(the LDA rank ceiling for 10 classes) and then plateaus/declines.
+**Shared-space dimensionality.** Accuracy rises monotonically with components
+up to `C-1 = 9` (the LDA rank ceiling for 10 classes): k=1→20.0%, k=5→91.9%,
+k=9→**97.7%**. No benefit beyond 9.
 Reproduce: `python experiments/ablation_components.py`.
 
-**Distance metric (nearest-class-mean).** On the shared space, `manhattan` and
-`cosine` consistently beat plain `euclidean`, plausibly because the projected
-axes contribute fairly independently.
+**Distance metric (nearest-class-mean).** All three metrics are competitive at
+k=9: euclidean 97.8%, manhattan 97.7%, cosine 97.7%. Euclidean edges ahead by
+0.1% but the difference is within noise.
 Reproduce: `python experiments/ablation_distance.py`.
 
 **Classifier.** A weighted ensemble — a distance-weighted nearest-neighbour vote
 on the shared projection (high weight) plus one LDA per raw view (low weight
-each) — is the strongest configuration, slightly above any single classifier.
+each) — is the strongest configuration at **98.7%**, above any single classifier.
 
 ## Headline result
 
 With `RobustScaler`, 9 components, and the weighted ensemble, the pipeline
-reaches **~98.7%** test accuracy on the canonical mfeat split. Under stratified
-5-fold cross-validation the estimate is similar with a small standard
-deviation. Reproduce: `python experiments/cross_validation.py`.
+reaches **98.7%** test accuracy on the canonical mfeat split. Under stratified
+5-fold cross-validation: **98.85% ± 0.52%** (folds: 98.5, 98.0, 99.25, 99.25, 99.25).
+Reproduce: `python experiments/cross_validation.py --folds 5`.
 
 ## ColorFERET — cross-pose face recognition
 
@@ -121,9 +123,9 @@ identity (the classical solver already is), keeping nearest-class-mean fair.
 
 | solver | MvDA + NCM (cosine) |
 |--------|--------------------:|
-| ratio (classical) | 97.7% |
+| ratio (classical) | **97.7%** |
 | exponential | 96.3% |
-| harmonic | 97.7% |
+| harmonic | **97.7%** |
 
 The classical solver is already at ceiling here — unsurprising, since mfeat has
 n ≫ d (1000 train vs 649 dims), so EDA's SSS advantage doesn't apply and the

@@ -21,6 +21,8 @@ Implemented [Kan et al., IEEE TPAMI 2016](docs/references/) from scratch in NumP
 
 Reproduce: `python experiments/baseline_comparison.py`
 
+5-fold cross-validation: **98.85% ± 0.52%** — `python experiments/cross_validation.py --folds 5`
+
 ### ColorFERET — cross-pose face recognition (pose = view, subject = class)
 
 PCA eigenfaces (120D/pose) → MvDA shared subspace → nearest-class-mean on held-out probe images.
