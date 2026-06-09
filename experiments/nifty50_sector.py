@@ -47,23 +47,22 @@ from mvda.metrics import classification_report_from_cm, confusion  # noqa: E402
 
 # ------------------------------------------------------------------ universe --
 NIFTY50_SECTORS: dict[str, list[str]] = {
-    "IT":       ["TCS.NS", "INFY.NS", "WIPRO.NS", "TECHM.NS", "HCLTECH.NS", "LTIM.NS"],
-    "Banking":  ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS",
-                 "SBIN.NS", "INDUSINDBK.NS"],
-    "Finance":  ["BAJFINANCE.NS", "BAJAJFINSV.NS", "SBILIFE.NS"],
-    "Energy":   ["RELIANCE.NS", "NTPC.NS", "POWERGRID.NS", "ONGC.NS",
-                 "BPCL.NS", "COALINDIA.NS"],
-    "Auto":     ["MARUTI.NS", "TATAMOTORS.NS", "EICHERMOT.NS",
-                 "HEROMOTOCO.NS", "BAJAJ-AUTO.NS", "M&M.NS"],
-    "FMCG":     ["HINDUNILVR.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS"],
-    "Pharma":   ["SUNPHARMA.NS", "DRREDDY.NS", "DIVISLAB.NS", "CIPLA.NS", "APOLLOHOSP.NS"],
-    "Metals":   ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS"],
-    "Infra":    ["LT.NS", "ULTRACEMCO.NS", "GRASIM.NS", "ADANIENT.NS", "ADANIPORTS.NS"],
-    "Consumer": ["ASIANPAINT.NS", "TITAN.NS", "BHARTIARTL.NS"],
+    "IT":         ["TCS.NS", "INFY.NS", "WIPRO.NS", "TECHM.NS", "HCLTECH.NS", "LTIMINDTREE.NS"],
+    "Financial":  ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS",
+                   "SBIN.NS", "INDUSINDBK.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "SBILIFE.NS"],
+    "Energy":     ["RELIANCE.NS", "NTPC.NS", "POWERGRID.NS", "ONGC.NS",
+                   "BPCL.NS", "COALINDIA.NS", "ADANIENT.NS", "ADANIPORTS.NS"],
+    "Auto":       ["MARUTI.NS", "TATAMOTORS.NS", "EICHERMOT.NS",
+                   "HEROMOTOCO.NS", "BAJAJ-AUTO.NS", "M&M.NS"],
+    "Consumer":   ["HINDUNILVR.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS",
+                   "ASIANPAINT.NS", "TITAN.NS", "BHARTIARTL.NS"],
+    "Pharma":     ["SUNPHARMA.NS", "DRREDDY.NS", "DIVISLAB.NS", "CIPLA.NS", "APOLLOHOSP.NS"],
+    "Industrial": ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS",
+                   "LT.NS", "ULTRACEMCO.NS", "GRASIM.NS"],
 }
 
-WINDOW = 21    # trading days per sample (~1 month)
-STRIDE = 5     # step between windows (~1 week)
+WINDOW = 63    # trading days per sample (~3 months); longer = more stable features
+STRIDE = 10    # step between windows (~2 weeks)
 MIN_DAYS = 300 # minimum history required per stock
 
 
@@ -109,7 +108,7 @@ def compute_views(close: np.ndarray, volume: np.ndarray) -> list[np.ndarray] | N
     vol10 = np.std(rets[-10:]) * ann
     vol21 = np.std(rets) * ann
     dd = c / np.maximum.accumulate(c) - 1
-    vov_windows = [np.std(rets[i:i+5]) for i in range(0, 15, 5) if i + 5 <= len(rets)]
+    vov_windows = [np.std(rets[i:i+5]) for i in range(0, len(rets) - 5, 5)]
     view2 = np.array([
         vol5, vol10, vol21,
         vol5 / (vol21 + 1e-9),
