@@ -23,9 +23,24 @@ PCA risk decomposition, and eigenportfolio construction**.
 
 ### Nifty 50 — Sector classification from multi-view rolling features
 
-Predicts stock sector (IT, Banking, Energy, Auto, FMCG, Pharma, Metals, Infra, Consumer)
-from a 21-day OHLCV window — 4 views: momentum, volatility, technicals, volume.
-No company name or prior sector label used at inference time.
+Predicts which of 7 market sectors a stock belongs to from a 63-day OHLCV window —
+4 feature views: momentum, volatility, technicals, volume. No company name used.
+
+| Method | Test Accuracy |
+|---|---:|
+| Random baseline | 14.29% (1/7) |
+| SVM (RBF) | 39.06% |
+| MLP | 40.91% |
+| Linear fusion (MvDA + Ensemble) | 31.31% |
+| **Random Forest** | **47.98%** |
+
+**Random Forest achieves 48% — 3.4× above random chance — from price/volume behaviour alone.**
+The gap between RF (48%) and linear fusion (31%) reveals that sector boundaries are partly
+nonlinear: Financial vs Consumer vs Industrial stocks show regime-dependent, nonlinear
+separation that a linear subspace cannot fully capture. This is consistent with known
+regime-switching behaviour in equity markets.
+
+![Nifty 50 sector t-SNE](results/nifty50_sectors.png)
 
 Reproduce: `python experiments/nifty50_sector.py` (requires `pip install yfinance`)
 

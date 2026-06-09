@@ -47,13 +47,12 @@ from mvda.metrics import classification_report_from_cm, confusion  # noqa: E402
 
 # ------------------------------------------------------------------ universe --
 NIFTY50_SECTORS: dict[str, list[str]] = {
-    "IT":         ["TCS.NS", "INFY.NS", "WIPRO.NS", "TECHM.NS", "HCLTECH.NS", "LTIMINDTREE.NS"],
+    "IT":         ["TCS.NS", "INFY.NS", "WIPRO.NS", "TECHM.NS", "HCLTECH.NS"],
     "Financial":  ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS",
                    "SBIN.NS", "INDUSINDBK.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "SBILIFE.NS"],
     "Energy":     ["RELIANCE.NS", "NTPC.NS", "POWERGRID.NS", "ONGC.NS",
                    "BPCL.NS", "COALINDIA.NS", "ADANIENT.NS", "ADANIPORTS.NS"],
-    "Auto":       ["MARUTI.NS", "TATAMOTORS.NS", "EICHERMOT.NS",
-                   "HEROMOTOCO.NS", "BAJAJ-AUTO.NS", "M&M.NS"],
+    "Auto":       ["MARUTI.NS", "EICHERMOT.NS", "HEROMOTOCO.NS", "BAJAJ-AUTO.NS", "M&M.NS"],
     "Consumer":   ["HINDUNILVR.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS",
                    "ASIANPAINT.NS", "TITAN.NS", "BHARTIARTL.NS"],
     "Pharma":     ["SUNPHARMA.NS", "DRREDDY.NS", "DIVISLAB.NS", "CIPLA.NS", "APOLLOHOSP.NS"],
