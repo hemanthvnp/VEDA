@@ -32,7 +32,7 @@ import numpy as np
 from scipy import stats
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.model_selection import GroupShuffleSplit, StratifiedShuffleSplit
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import LabelEncoder, RobustScaler
 from sklearn.svm import SVC
@@ -159,6 +159,8 @@ def build_dataset(period: str = "2y"):
 
     all_views: list[list[np.ndarray]] = [[] for _ in range(4)]
     all_labels: list[str] = []
+    all_tickers: list[str] = []
+    all_dates: list[np.datetime64] = []
 
     for sector, tickers in NIFTY50_SECTORS.items():
         sector_count = 0
@@ -170,6 +172,7 @@ def build_dataset(period: str = "2y"):
                     continue
                 close  = df["Close"].ffill().values.flatten()
                 volume = df["Volume"].ffill().values.flatten()
+                dates  = df.index.values
             except Exception:
                 continue
 
@@ -181,6 +184,8 @@ def build_dataset(period: str = "2y"):
                 for v_idx, feat in enumerate(result):
                     all_views[v_idx].append(feat)
                 all_labels.append(sector)
+                all_tickers.append(ticker)
+                all_dates.append(dates[end - 1])
                 sector_count += 1
 
         print(f"  {sector:<12} {sector_count:>4} windows from {len(tickers)} stocks")
@@ -190,74 +195,121 @@ def build_dataset(period: str = "2y"):
 
     views = [np.vstack(all_views[i]) for i in range(4)]
     labels = np.array(all_labels)
-    return views, labels
+    tickers = np.array(all_tickers)
+    dates = np.array(all_dates, dtype="datetime64[D]")
+    return views, labels, tickers, dates
+
+
+# ------------------------------------------------------------------ splits --
+def make_splits(views: list[np.ndarray], y: np.ndarray, tickers: np.ndarray,
+                 dates: np.ndarray) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Three evaluation splits, from most to least optimistic.
+
+    Windows are built with WINDOW=63 / STRIDE=10, i.e. consecutive windows for
+    the same stock overlap by ~84% of their days. A naive random split over
+    pooled windows puts near-duplicate windows on both sides, and never forces
+    the model to see a stock it hasn't already trained on -- so it can "solve"
+    the task by memorizing per-ticker signatures instead of learning
+    transferable sector behaviour. The other two splits close those holes.
+    """
+    n = len(y)
+    idx = np.arange(n)
+    splits = {}
+
+    # 1) Naive: random 70/30 over pooled, overlapping windows (the original
+    #    methodology -- kept only as a reference point for how much the other
+    #    two splits cost).
+    sss = StratifiedShuffleSplit(n_splits=1, test_size=0.30, random_state=0)
+    splits["naive random (overlapping windows -- leaked)"] = next(sss.split(views[0], y))
+
+    # 2) Grouped: leave whole stocks out, so test tickers are never seen in
+    #    training. Kills the "memorize the ticker" shortcut.
+    gss = GroupShuffleSplit(n_splits=1, test_size=0.30, random_state=0)
+    splits["grouped (leave-stocks-out)"] = next(gss.split(views[0], y, groups=tickers))
+
+    # 3) Chronological: train on the earliest ~70% of dates, test on the
+    #    latest ~30%, per the global timeline. Kills within-ticker
+    #    train/test overlap (train windows always end before test windows)
+    #    and answers the practically relevant question: does this generalize
+    #    forward in time?
+    cutoff = np.quantile(dates.astype("int64"), 0.70)
+    tr_mask = dates.astype("int64") <= cutoff
+    splits["chronological (train past, test future)"] = (idx[tr_mask], idx[~tr_mask])
+
+    return splits
 
 
 # ------------------------------------------------------------------- train --
-def run(views: list[np.ndarray], labels: np.ndarray):
+def run(views: list[np.ndarray], labels: np.ndarray, tickers: np.ndarray, dates: np.ndarray):
     le = LabelEncoder()
     y = le.fit_transform(labels)
     n_classes = len(le.classes_)
 
-    # Stratified 70/30 split
-    sss = StratifiedShuffleSplit(n_splits=1, test_size=0.30, random_state=0)
-    tr_idx, te_idx = next(sss.split(views[0], y))
-
-    Xtr = [v[tr_idx] for v in views]
-    Xte = [v[te_idx] for v in views]
-    ytr, yte = y[tr_idx], y[te_idx]
-
-    # Per-view scaling
-    scalers = [RobustScaler().fit(X) for X in Xtr]
-    Xtr = [s.transform(X) for s, X in zip(scalers, Xtr)]
-    Xte = [s.transform(X) for s, X in zip(scalers, Xte)]
-
-    Xtr_cat = np.hstack(Xtr)
-    Xte_cat = np.hstack(Xte)
-
     def acc(yt, yp):
         return classification_report_from_cm(confusion(yt, yp))["accuracy"] * 100
 
-    rows = []
+    splits = make_splits(views, y, tickers, dates)
+    all_rows: dict[str, list[tuple[str, str, float]]] = {}
+    plot_ctx = None
 
-    # Baselines on concatenated features
-    for name, clf in [
-        ("Random Forest",   RandomForestClassifier(200, random_state=0, n_jobs=-1)),
-        ("SVM (RBF)",       SVC(C=10, gamma="scale", random_state=0)),
-        ("MLP",             MLPClassifier((256, 128), max_iter=500, random_state=0)),
-    ]:
-        clf.fit(Xtr_cat, ytr)
-        rows.append((name, "concat", acc(yte, clf.predict(Xte_cat))))
+    for split_name, (tr_idx, te_idx) in splits.items():
+        Xtr = [v[tr_idx] for v in views]
+        Xte = [v[te_idx] for v in views]
+        ytr, yte = y[tr_idx], y[te_idx]
 
-    # Best single-view LDA
-    best_v_acc, best_v_name = 0.0, ""
-    view_names = ["Returns", "Volatility", "Technical", "Volume"]
-    for vi, (Xv, Xtv) in enumerate(zip(Xtr, Xte)):
-        k = min(n_classes - 1, Xv.shape[1] - 1)
-        lda = LinearDiscriminantAnalysis(n_components=max(1, k)).fit(Xv, ytr)
-        a = acc(yte, lda.predict(Xtv))
-        if a > best_v_acc:
-            best_v_acc, best_v_name = a, view_names[vi]
-    rows.append((f"Single-view LDA ({best_v_name})", "1 view", best_v_acc))
+        # Per-view scaling (fit on train only)
+        scalers = [RobustScaler().fit(X) for X in Xtr]
+        Xtr = [s.transform(X) for s, X in zip(scalers, Xtr)]
+        Xte = [s.transform(X) for s, X in zip(scalers, Xte)]
 
-    # Multi-view fusion
-    mvlda = MultiViewLDA(mode="mvda", solver="ratio").fit(Xtr, ytr)
-    rows.append(("MvDA + NCM (cosine)", "4 views fused",
-                 acc(yte, NearestClassMean(mvlda, metric="cosine").predict(Xte))))
+        Xtr_cat = np.hstack(Xtr)
+        Xte_cat = np.hstack(Xte)
 
-    mvlda_c = MultiViewLDA(mode="concat", solver="ratio").fit(Xtr, ytr)
-    ens = MvdaEnsemble(mvlda_c).fit(Xtr, ytr)
-    rows.append(("Concat-LDA + Ensemble", "4 views fused", acc(yte, ens.predict(Xte))))
+        rows = []
 
-    # Print results
-    print(f"\n{'Method':<32}{'Input':<18}{'Test Acc':>10}")
-    print("-" * 62)
-    for name, inp, a in rows:
-        print(f"{name:<32}{inp:<18}{a:>9.2f}%")
+        # Baselines on concatenated features
+        for name, clf in [
+            ("Random Forest",   RandomForestClassifier(200, random_state=0, n_jobs=-1)),
+            ("SVM (RBF)",       SVC(C=10, gamma="scale", random_state=0)),
+            ("MLP",             MLPClassifier((256, 128), max_iter=500, random_state=0)),
+        ]:
+            clf.fit(Xtr_cat, ytr)
+            rows.append((name, "concat", acc(yte, clf.predict(Xte_cat))))
 
-    # t-SNE visualization
+        # Best single-view LDA
+        best_v_acc, best_v_name = 0.0, ""
+        view_names = ["Returns", "Volatility", "Technical", "Volume"]
+        for vi, (Xv, Xtv) in enumerate(zip(Xtr, Xte)):
+            k = min(n_classes - 1, Xv.shape[1] - 1)
+            lda = LinearDiscriminantAnalysis(n_components=max(1, k)).fit(Xv, ytr)
+            a = acc(yte, lda.predict(Xtv))
+            if a > best_v_acc:
+                best_v_acc, best_v_name = a, view_names[vi]
+        rows.append((f"Single-view LDA ({best_v_name})", "1 view", best_v_acc))
+
+        # Multi-view fusion
+        mvlda = MultiViewLDA(mode="mvda", solver="ratio").fit(Xtr, ytr)
+        rows.append(("MvDA + NCM (cosine)", "4 views fused",
+                     acc(yte, NearestClassMean(mvlda, metric="cosine").predict(Xte))))
+
+        mvlda_c = MultiViewLDA(mode="concat", solver="ratio").fit(Xtr, ytr)
+        ens = MvdaEnsemble(mvlda_c).fit(Xtr, ytr)
+        rows.append(("Concat-LDA + Ensemble", "4 views fused", acc(yte, ens.predict(Xte))))
+
+        all_rows[split_name] = rows
+        if split_name.startswith("grouped"):
+            plot_ctx = (Xte, yte, mvlda)
+
+        print(f"\n=== {split_name} ===")
+        print(f"{'Method':<32}{'Input':<18}{'Test Acc':>10}")
+        print("-" * 62)
+        for name, inp, a in rows:
+            print(f"{name:<32}{inp:<18}{a:>9.2f}%")
+
+    # t-SNE visualization on the honest (leave-stocks-out) split
+    Xte, yte, mvlda = plot_ctx
     _plot_tsne(Xte, yte, mvlda, le)
-    return rows
+    return all_rows
 
 
 # -------------------------------------------------------------------- plot --
@@ -302,22 +354,22 @@ def _plot_tsne(Xte, yte, mvlda, le):
     out = os.path.join(_ROOT, "results", "nifty50_sectors.png")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.savefig(out, dpi=150, bbox_inches="tight")
-    print(f"Saved → {out}")
+    print(f"Saved -> {out}")
 
 
 # ---------------------------------------------------------------------- main --
 def main():
     print("Downloading Nifty 50 data (2 years) ...")
-    views, labels = build_dataset(period="2y")
+    views, labels, tickers, dates = build_dataset(period="2y")
 
     unique, counts = np.unique(labels, return_counts=True)
-    print(f"\nDataset: {len(labels)} windows | {len(unique)} sectors")
+    print(f"\nDataset: {len(labels)} windows | {len(unique)} sectors | {len(np.unique(tickers))} stocks")
     for s, c in zip(unique, counts):
         print(f"  {s:<12} {c:>4} windows")
 
     print(f"\nFeature dims: {[v.shape[1] for v in views]} across 4 views")
-    print("\nTraining multi-view sector classifier ...")
-    run(views, labels)
+    print("\nTraining multi-view sector classifier under three evaluation splits ...")
+    run(views, labels, tickers, dates)
 
 
 if __name__ == "__main__":
