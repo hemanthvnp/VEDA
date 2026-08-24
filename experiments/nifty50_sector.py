@@ -32,6 +32,7 @@ import numpy as np
 from scipy import stats
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.kernel_approximation import RBFSampler
 from sklearn.model_selection import GroupShuffleSplit, StratifiedShuffleSplit
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import LabelEncoder, RobustScaler
@@ -239,6 +240,43 @@ def make_splits(views: list[np.ndarray], y: np.ndarray, tickers: np.ndarray,
     return splits
 
 
+# --------------------------------------------------------- MvDA variants --
+def _view_fisher_weights(Xs: list[np.ndarray], y: np.ndarray) -> np.ndarray:
+    """Per-view discriminability: trace(S_b)/trace(S_w) computed independently
+    for each view, normalized to mean 1. Views that separate classes well on
+    their own get up-weighted before fusion; views that don't get down-weighted
+    -- instead of MvDA's default of trusting every view equally."""
+    scores = []
+    classes = np.unique(y)
+    for X in Xs:
+        mu = X.mean(axis=0)
+        s_b = s_w = 0.0
+        for c in classes:
+            Xc = X[y == c]
+            mu_c = Xc.mean(axis=0)
+            s_w += np.sum((Xc - mu_c) ** 2)
+            s_b += Xc.shape[0] * np.sum((mu_c - mu) ** 2)
+        scores.append(s_b / (s_w + 1e-9))
+    scores = np.array(scores)
+    return scores / scores.mean()
+
+
+def _rff_transform(Xtr: list[np.ndarray], Xte: list[np.ndarray],
+                    n_components: int = 150, random_state: int = 0):
+    """Approximate an RBF kernel per view via random Fourier features (Rahimi &
+    Recht, 2007), then hand the expanded features to the existing linear MvDA.
+    This gives MvDA a nonlinear decision boundary without deriving a new dual
+    solver -- reuses the tested linear code, only the input features change."""
+    samplers = [
+        RBFSampler(gamma=1.0 / X.shape[1], n_components=n_components,
+                   random_state=random_state).fit(X)
+        for X in Xtr
+    ]
+    Xtr_k = [s.transform(X) for s, X in zip(samplers, Xtr)]
+    Xte_k = [s.transform(X) for s, X in zip(samplers, Xte)]
+    return Xtr_k, Xte_k
+
+
 # ------------------------------------------------------------------- train --
 def run(views: list[np.ndarray], labels: np.ndarray, tickers: np.ndarray, dates: np.ndarray):
     le = LabelEncoder()
@@ -287,14 +325,51 @@ def run(views: list[np.ndarray], labels: np.ndarray, tickers: np.ndarray, dates:
                 best_v_acc, best_v_name = a, view_names[vi]
         rows.append((f"Single-view LDA ({best_v_name})", "1 view", best_v_acc))
 
-        # Multi-view fusion
+        # Multi-view fusion -- across the arithmetic/geometric/harmonic
+        # power-mean family of between-class scatter reweightings.
         mvlda = MultiViewLDA(mode="mvda", solver="ratio").fit(Xtr, ytr)
-        rows.append(("MvDA + NCM (cosine)", "4 views fused",
+        rows.append(("MvDA + NCM (ratio, arithmetic)", "4 views fused",
                      acc(yte, NearestClassMean(mvlda, metric="cosine").predict(Xte))))
+
+        mvlda_geo = MultiViewLDA(mode="mvda", solver="geometric").fit(Xtr, ytr)
+        rows.append(("MvDA + NCM (geometric)", "4 views fused",
+                     acc(yte, NearestClassMean(mvlda_geo, metric="cosine").predict(Xte))))
+
+        mvlda_harm = MultiViewLDA(mode="mvda", solver="harmonic").fit(Xtr, ytr)
+        rows.append(("MvDA + NCM (harmonic)", "4 views fused",
+                     acc(yte, NearestClassMean(mvlda_harm, metric="cosine").predict(Xte))))
 
         mvlda_c = MultiViewLDA(mode="concat", solver="ratio").fit(Xtr, ytr)
         ens = MvdaEnsemble(mvlda_c).fit(Xtr, ytr)
         rows.append(("Concat-LDA + Ensemble", "4 views fused", acc(yte, ens.predict(Xte))))
+
+        # -- improvised variants -------------------------------------------
+        # (1) View-reliability weighting: scale each view by its own train-set
+        #     Fisher discriminability before fusing, instead of trusting all
+        #     views equally.
+        w = _view_fisher_weights(Xtr, ytr)
+        Xtr_w = [X * np.sqrt(wv) for X, wv in zip(Xtr, w)]
+        Xte_w = [X * np.sqrt(wv) for X, wv in zip(Xte, w)]
+        mvlda_w = MultiViewLDA(mode="mvda", solver="ratio").fit(Xtr_w, ytr)
+        rows.append(("MvDA (view-weighted)", "4 views fused",
+                     acc(yte, NearestClassMean(mvlda_w, metric="cosine").predict(Xte_w))))
+
+        # (2) Kernel MvDA: random-Fourier-feature expansion per view, then the
+        #     same linear MvDA solver -- approximate nonlinear decision surface.
+        Xtr_k, Xte_k = _rff_transform(Xtr, Xte)
+        mvlda_k = MultiViewLDA(mode="mvda", solver="ratio").fit(Xtr_k, ytr)
+        rows.append(("Kernel MvDA (RFF)", "4 views fused",
+                     acc(yte, NearestClassMean(mvlda_k, metric="cosine").predict(Xte_k))))
+
+        # (3) Stack the MvDA embedding onto the raw concatenated features and
+        #     hand that to RF -- mirrors the UCI-digits VEDA+Ensemble result,
+        #     where the fused embedding helps a nonlinear classifier rather
+        #     than replacing it.
+        Xtr_stack = np.hstack([Xtr_cat, mvlda.transform(Xtr)])
+        Xte_stack = np.hstack([Xte_cat, mvlda.transform(Xte)])
+        rf_stack = RandomForestClassifier(200, random_state=0, n_jobs=-1).fit(Xtr_stack, ytr)
+        rows.append(("Random Forest + MvDA embedding", "concat+embed",
+                     acc(yte, rf_stack.predict(Xte_stack))))
 
         all_rows[split_name] = rows
         if split_name.startswith("grouped"):

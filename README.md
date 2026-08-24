@@ -24,7 +24,30 @@ inflating accuracy. Reporting all three splits, least to most honest:
 The honest, generalizable result is **~1.8–2.1x random**, not the naive
 split's 3.4x — the gap is the model partly memorizing per-ticker signatures
 and overlapping-window duplicates rather than transferable sector behavior.
-`python experiments/nifty50_sector.py` prints all three splits.
+
+**Closing the gap with RF.** Plain MvDA trails RF because it's a linear
+method; three ways of improving it were tried, reported honestly whether or
+not they worked:
+
+| Variant | Grouped (honest) | Chronological (honest) |
+|---|---:|---:|
+| MvDA (plain) | 21.59% | 18.63% |
+| MvDA (view-weighted, auto Fisher score) | 21.59% (no effect) | 18.63% (no effect) |
+| RF + MvDA embedding (stacked) | 21.92% (no help) | 25.47% (~same as RF) |
+| **Kernel MvDA (random Fourier features)** | **24.19%** | **20.17%** |
+| Random Forest (reference) | 23.38% | 25.81% |
+
+View-reweighting and stacking the embedding into RF (which won on the UCI
+digits task) did nothing here. Kernelizing MvDA via a random-Fourier-feature
+expansion per view — approximating an RBF kernel, then running the same
+linear solver — meaningfully closed the gap and **beat RF on the
+leave-stocks-out split**, while keeping the shared-embedding property RF
+doesn't have (cross-view matching, graceful handling of a missing view at
+inference time). The bottleneck was the linear-decision-boundary assumption,
+not the multi-view fusion itself.
+
+`python experiments/nifty50_sector.py` prints all three splits and all
+method variants.
 
 ![Nifty 50 sector t-SNE](results/nifty50_sectors.png)
 

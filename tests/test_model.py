@@ -85,7 +85,7 @@ def test_per_view_labels_and_probe():
 
 def test_all_solvers_run_and_separate():
     Xs, y = _toy_two_view()
-    for solver in ("ratio", "exponential", "harmonic"):
+    for solver in ("ratio", "exponential", "geometric", "harmonic"):
         m = MultiViewLDA(mode="mvda", solver=solver).fit(Xs, y)
         assert np.isfinite(m.W_).all()
         acc = (NearestClassMean(m, metric="euclidean").predict(Xs) == y).mean()

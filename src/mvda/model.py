@@ -21,9 +21,20 @@ An optional view-consistency (VC) penalty (``vc_lambda``) encourages different
 views' projections of the *same* instance to land close together.
 
 The discriminant subspace can be solved several ways (``solver=``):
-  * ``ratio``       -- classical LDA generalized eigenproblem (default).
+  * ``ratio``       -- classical LDA generalized eigenproblem (default). Its
+    between-class scatter is, algebraically, the *arithmetic* mean of pairwise
+    class-centroid distances weighted by n_k*n_l -- see ``_solve_harmonic``'s
+    docstring for the identity. It is dominated by far-apart, already-easy
+    pairs.
   * ``exponential`` -- Exponential DA: exp(S_b) w = lambda exp(S_w) w, robust to
     the small-sample-size singularity and margin-enlarging (Adil et al. 2016).
+  * ``geometric``   -- Geometric-mean LDA (this project, not from a cited
+    paper): same iterative pairwise-reweighting scheme as ``harmonic`` below,
+    but weighting each class pair by ``n_k*n_l / dist_kl`` -- a single inverse
+    power of distance. Sits at the natural midpoint of the power-mean family
+    between ``ratio`` (no distance reweighting, power 0) and ``harmonic``
+    (inverse-fourth-power reweighting, see below): a moderate emphasis on
+    close/confusable pairs without harmonic's more aggressive one.
   * ``harmonic``    -- Harmonic-mean LDA: reweights pairwise between-class
     scatter toward close, confusable class pairs (Zheng et al., TKDE 2018).
 All solvers' outputs are whitened so the projected within-class scatter is the
@@ -40,7 +51,7 @@ from typing import List, Optional
 import numpy as np
 from scipy.linalg import eigh, expm
 
-SOLVERS = ("ratio", "exponential", "harmonic")
+SOLVERS = ("ratio", "exponential", "geometric", "harmonic")
 
 
 def _top_k(A, B, k):
@@ -90,9 +101,36 @@ def _solve_harmonic(S_b, S_w, k, means=None, counts=None, iters=15, eps=1e-6, **
     return W
 
 
+def _solve_geometric(S_b, S_w, k, means=None, counts=None, iters=15, eps=1e-6, **_):
+    """Geometric-mean LDA (this project -- not from a cited paper).
+
+    Same iterative pairwise-reweighting scheme as ``_solve_harmonic``, but
+    with weight w_kl ~ n_k n_l / dist_kl (a single inverse power of distance,
+    versus harmonic's inverse-*squared*-distance i.e. dist_kl^-4 in the
+    weight). This sits between ``ratio`` (no distance reweighting) and
+    ``harmonic`` (the strongest reweighting) in the power-mean family:
+    a moderate rather than aggressive emphasis on close/confusable pairs.
+    """
+    W = _top_k(S_b, S_w, k)
+    n_outer = np.outer(counts, counts).astype(float)
+    np.fill_diagonal(n_outer, 0.0)
+    for _ in range(iters):
+        P = means @ W
+        sq = np.sum(P * P, axis=1)
+        dist2 = sq[:, None] + sq[None, :] - 2 * P @ P.T
+        np.fill_diagonal(dist2, np.inf)
+        dist = np.sqrt(np.maximum(dist2, 0.0))
+        Wgt = n_outer / (dist + eps)                    # moderate emphasis on close pairs
+        L = np.diag(Wgt.sum(axis=1)) - Wgt
+        S_b_w = means.T @ L @ means
+        W = _top_k(S_b_w, S_w, k)
+    return W
+
+
 _SOLVER_FN = {
     "ratio": _solve_ratio,
     "exponential": _solve_exponential,
+    "geometric": _solve_geometric,
     "harmonic": _solve_harmonic,
 }
 
